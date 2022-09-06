@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	delbuf "tjweldon/sequencer/delay_buffers"
-	"tjweldon/sequencer/util"
+	delbuf "tjweldon/beatbox/delay_buffers"
+	"tjweldon/beatbox/util"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/speaker"
@@ -17,7 +17,7 @@ type Logger struct {
 	prefixes []any
 }
 
-//Ctx returns a copy of the logger with the given prefix added after all pre-existing prefixes
+// Ctx returns a copy of the logger with the given prefix added after all pre-existing prefixes
 func (l Logger) Ctx(prefix string) Logger {
 	return Logger{append(l.prefixes, prefix+":")}
 }
@@ -35,8 +35,8 @@ var (
 	Kick = util.BufferSample("./kick.wav")
 	Clap = util.BufferSample("./clap.wav")
 	Hat  = util.BufferSample("./hat.wav")
-    // Empty is literally an empty buffer
-    Empty = beep.NewBuffer(Kick.Format())
+	// Empty is literally an empty buffer
+	Empty = beep.NewBuffer(Kick.Format())
 )
 
 // Tempo is the tempo of the song in beats per minute
@@ -149,22 +149,22 @@ func Quantise(stream Stream, tempo delbuf.Tempo, q delbuf.Quantisation) Stream {
 		truncated := delbuf.TruncateHead(buf, timing.Samples)
 		buf = beep.NewBuffer(Format)
 		nxt := stream()
-		
-        // handle upstream exhausted
-        if nxt == nil {
+
+		// handle upstream exhausted
+		if nxt == nil {
 			logger.Log("upstream exhausted")
 			return nil
 		}
 
-        // Create a buffer made of...
+		// Create a buffer made of...
 		buf.Append(
 			// a mix of the following streamers:
-            beep.Mix(	
-                // Beat makes sure the quantised chunk is at least one beat long
-                Beat(),                                 
-                // This is the new sounds coming in from stream
-				nxt,                                  
-                // The tail end of the previous chunk
+			beep.Mix(
+				// Beat makes sure the quantised chunk is at least one beat long
+				Beat(),
+				// This is the new sounds coming in from stream
+				nxt,
+				// The tail end of the previous chunk
 				truncated.Streamer(0, truncated.Len()),
 			),
 		)
@@ -188,7 +188,7 @@ func PopBuffer(buf *beep.Buffer, upto int) (head beep.Streamer, tail *beep.Buffe
 	return head, tail
 }
 
-// AudioBuffer is a function that takes a Stream and uses it to populate a 
+// AudioBuffer is a function that takes a Stream and uses it to populate a
 // buffer that is used to store a set amound of pre-rendered audio. The
 // generator should send the buffer's contents to the speaker and then refill
 type AudioBuf func(stream Stream, lengthQuanta int) Stream

@@ -1,4 +1,4 @@
-module tjweldon/sequencer
+module tjweldon/beatbox
 
 go 1.18
 
