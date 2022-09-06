@@ -3,190 +3,253 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 	"time"
 
+	delbuf "tjweldon/sequencer/delay_buffers"
+	"tjweldon/sequencer/util"
+
 	"github.com/faiface/beep"
-	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/speaker"
-	"github.com/faiface/beep/wav"
 )
 
-func Min(a, b int) int {
-	if a > b {
-		return b
-	} else {
-		return a
-	}
+// Logger is a context-aware logger
+type Logger struct {
+	prefixes []any
 }
 
-func Max(a, b int) int {
-	if a > b {
-		return a
-	} else {
-		return b
-	}
+//Ctx returns a copy of the logger with the given prefix added after all pre-existing prefixes
+func (l Logger) Ctx(prefix string) Logger {
+	return Logger{append(l.prefixes, prefix+":")}
 }
 
-type Beat time.Duration
-
-func (b Beat) Tempo() Tempo {
-	return Tempo(time.Minute) / Tempo(b)
-}
-func (b Beat) Sixteenth() Beat {
-	return b / 4
+// Log shares its interface with log.Println
+func (l Logger) Log(msgs ...any) {
+	log.Println(append(l.prefixes, msgs...)...)
 }
 
-type Tempo float64
+// set up the main logger
+var logger = Logger{}.Ctx("main.go")
 
-func (t Tempo) BeatDuration() Beat {
-	return Beat(time.Minute) / Beat(t)
-}
-func (t Tempo) Sixteenth() Beat {
-	return t.BeatDuration().Sixteenth()
-}
+// Kick, Clap, Hat are loaded on module load
+var (
+	Kick = util.BufferSample("./kick.wav")
+	Clap = util.BufferSample("./clap.wav")
+	Hat  = util.BufferSample("./hat.wav")
+    // Empty is literally an empty buffer
+    Empty = beep.NewBuffer(Kick.Format())
+)
 
-type Sample struct {
-	path   string
-	format beep.Format
-	buf    *beep.Buffer
-}
+// Tempo is the tempo of the song in beats per minute
+var Tempo = delbuf.Tempo(128)
 
-func LoadWavSample(path string) (buf *beep.Buffer, format beep.Format, err error) {
-	file, err := os.Open(path)
-	if err != nil {
-		log.Fatal(err)
-	}
-	streamer, format, err := wav.Decode(file)
-	if err != nil {
-		return
-	}
-	speaker.Play(streamer)
+// Format is the format of the samples
+var Format = Kick.Format()
 
-	buf = beep.NewBuffer(format)
-	buf.Append(streamer)
-	if err = streamer.Close(); err != nil {
-		return
+// Beat is a Stream that always returns a streamer that is at least one beat long and silent
+var Beat = func() beep.Streamer { return beep.Silence(Tempo.Count(Format)) }
+
+// Stream is a synchronous generator of beep.Streamers
+type Stream func() beep.Streamer
+
+// MakeStream returns a Stream that always plays the buffered sample
+func MakeStream(buf *beep.Buffer) Stream {
+	stream := func() beep.Streamer {
+		return buf.Streamer(0, buf.Len())
 	}
 
-	return buf, format, err
+	return stream
 }
 
-func NewSample(path string) (s *Sample, err error) {
-	buf, format, err := LoadWavSample(path)
-	s = &Sample{path: path, format: format, buf: buf}
+// Sequencer is a Streamer that is initialised with a sequence of booleans
+// that represent whether a sound should be played or not
+type Sequencer func(stream Stream, seq []bool, loop bool) Stream
 
-	return s, err
-}
+// Sequence is a Sequencer implementation
+func Sequence(stream Stream, seq []bool, loop bool) Stream {
+	logger := logger.Ctx("Sequence")
+	n := 0
+	emptyGen := MakeStream(Empty)
 
-func (s *Sample) GetFormat() beep.Format     { return s.format }
-func (s *Sample) GetDuration() time.Duration { return s.format.SampleRate.D(s.buf.Len()) }
-func (s *Sample) GetLen() int                { return s.buf.Len() }
-
-// GetStreamer handles extending the sample with silence if the sustain is longer than the sample
-// if the sustain is shorter, the sample is cut off
-func (s *Sample) GetStreamer(hold int) beep.StreamSeeker {
-	diff := hold - s.buf.Len()
-	if diff > 0 {
-		s.buf.Append(beep.Silence(diff))
-	}
-	return s.buf.Streamer(0, hold)
-}
-
-type Sequence struct {
-	sample   *Sample
-	on       [16]bool
-	volume   *effects.Volume
-	ctrl     *beep.Ctrl
-	tempo    Tempo
-	streamer beep.Streamer
-	err      error
-}
-
-func NewSequence(sample *Sample, pattern [16]bool, tempo Tempo) *Sequence {
-	s := &Sequence{
-		sample: sample,
-		on:     pattern,
-		tempo:  tempo,
-	}
-	var err error
-	s.streamer, err = s.getStreamer()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return s
-}
-
-func (seq *Sequence) getStreamer() (_ beep.Streamer, err error) {
-	hold := seq.sample.GetFormat().SampleRate.N(
-		time.Duration(
-			seq.tempo.Sixteenth(),
-		),
-	)
-
-	fmt.Println(hold, seq.sample.GetFormat().SampleRate.D(hold))
-	newBuf := beep.NewBuffer(seq.sample.GetFormat())
-	for _, play := range seq.on {
+	logger.Log("initialising sequence outStream")
+	outStream := func() beep.Streamer {
+		logger := logger.Ctx("outStream")
 		var s beep.Streamer
-		if play {
-			s = seq.sample.GetStreamer(hold)
-		} else {
-			s = beep.Silence(hold)
+		// if we're done with the sequence, return nil
+		if n >= len(seq) {
+			logger.Log("sequence complete")
+			return nil
 		}
 
-		newBuf.Append(s)
+		// otherwise send either the sound
+		if seq[n] {
+			s = stream()
+		} else {
+			s = emptyGen()
+		}
+
+		n = (n + 1)
+		if loop {
+			n = n % len(seq)
+		}
+
+		return s
 	}
 
-	concat := beep.Loop(-1, newBuf.Streamer(0, newBuf.Len()))
-
-	seq.ctrl = &beep.Ctrl{Streamer: concat, Paused: false}
-	seq.volume = &effects.Volume{Streamer: seq.ctrl, Base: 2, Volume: 1, Silent: false}
-	return seq.volume, err
+	return outStream
 }
 
-func (seq *Sequence) Stream(buf [][2]float64) (n int, ok bool) {
-	n, ok = seq.streamer.Stream(buf[:])
-	if !ok {
-		seq.err = seq.streamer.Err()
+// Mixer takes a slice of Stream functions and returns a Stream function which
+// is the superposition of all the streams.
+type Mixer func([]Stream) Stream
+
+// Mix is an implementation of Mixer
+func Mix(streams []Stream) Stream {
+	logger := logger.Ctx("Mix")
+	logger.Log("initialising mix outStream")
+	outStream := func() beep.Streamer {
+		logger.Ctx("outStream")
+		buf := beep.NewBuffer(Format)
+		sequenceStep := make([]beep.Streamer, len(streams))
+		allClosed := false
+		for i, incoming := range streams {
+			sequenceStep[i] = incoming()
+
+			// if sequenceStep[i] == nil is true for all incoming
+			// then we're done
+			allClosed = allClosed && sequenceStep[i] == nil
+		}
+
+		// allClosed being true indicates we're done
+		if allClosed {
+			logger.Log("all sequences exhausted")
+			return nil
+		}
+		buf.Append(beep.Mix(sequenceStep...))
+
+		logger.Log("created buffer of", buf.Len(), "samples")
+		return buf.Streamer(0, buf.Len())
 	}
 
-	return n, ok
+	return outStream
 }
 
-func (seq *Sequence) Err() error {
-	return seq.err
+// Quantiser is a function that takes a Stream, a tempo and a quantisation and
+// returns a Stream that is quantised to the given tempo and quantisation
+type Quantiser func(Stream, timing delbuf.Tempo, q delbuf.Quantisation) Stream
+
+// Quantise is an implementation of Quantiser
+func Quantise(stream Stream, tempo delbuf.Tempo, q delbuf.Quantisation) Stream {
+	logger := logger.Ctx("Quantise")
+	buf := beep.NewBuffer(Format)
+	timing := delbuf.Timing{}.From(Tempo, Format).Quantise(q)
+
+	logger.Log("initialising")
+	outStream := func() beep.Streamer {
+		logger := logger.Ctx("outStream")
+		truncated := delbuf.TruncateHead(buf, timing.Samples)
+		buf = beep.NewBuffer(Format)
+		nxt := stream()
+		
+        // handle upstream exhausted
+        if nxt == nil {
+			logger.Log("upstream exhausted")
+			return nil
+		}
+
+        // Create a buffer made of...
+		buf.Append(
+			// a mix of the following streamers:
+            beep.Mix(	
+                // Beat makes sure the quantised chunk is at least one beat long
+                Beat(),                                 
+                // This is the new sounds coming in from stream
+				nxt,                                  
+                // The tail end of the previous chunk
+				truncated.Streamer(0, truncated.Len()),
+			),
+		)
+
+		// send one beat's worth
+		logger.Log("sending a quantum of tunage")
+		return buf.Streamer(0, timing.Samples)
+	}
+
+	return outStream
 }
 
-type Unit struct{}
+// PopBuffer pops a streamer from the head of a buffer and returns both the head as a streamer and
+// the truncated tail as a buffer
+func PopBuffer(buf *beep.Buffer, upto int) (head beep.Streamer, tail *beep.Buffer) {
+	logger := logger.Ctx("PopBuffer")
+	head = buf.Streamer(0, upto)
+	tail = delbuf.TruncateHead(buf, upto-1)
+
+	logger.Log("popped", upto, " off head of buffer with length", buf.Len(), ";", tail.Len(), "remaining")
+	return head, tail
+}
+
+// AudioBuffer is a function that takes a Stream and uses it to populate a 
+// buffer that is used to store a set amound of pre-rendered audio. The
+// generator should send the buffer's contents to the speaker and then refill
+type AudioBuf func(stream Stream, lengthQuanta int) Stream
+
+// BufferAudio is an implementation of AudioBuf
+func BufferAudio(stream Stream, lengthQuanta int, timing delbuf.Timing) Stream {
+	logger := logger.Ctx("BufferAudio")
+	logger.Log("initialising buffer outStream")
+
+	buf := beep.NewBuffer(Format)
+	outStream := func() beep.Streamer {
+		logger.Ctx("outStream")
+		for buf.Len() <= timing.Samples*lengthQuanta {
+			nxt := stream()
+			if nxt == nil {
+				return nil
+			}
+			buf.Append(nxt)
+		}
+		var out beep.Streamer
+		logger.Log("buffer has", buf.Len(), "samples")
+		out, buf = PopBuffer(buf, timing.Samples)
+		return out
+	}
+
+	return outStream
+}
 
 func main() {
-	kick, err := NewSample("./kick.wav")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	clap, err := NewSample("./clap.wav")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	hat, err := NewSample("./hat.wav")
-	if err != nil {
-		log.Fatal(err)
-	}
-	ft := kick.GetFormat()
-
-	speaker.Init(ft.SampleRate, ft.SampleRate.N(time.Second/10))
-
-	banger := beep.Mix(
-		NewSequence(kick, [16]bool{0: true, 4: true, 8: true, 12: true}, Tempo(120)),
-		NewSequence(clap, [16]bool{2: true, 6: true, 10: true, 14: true}, Tempo(120)),
-		NewSequence(hat, [16]bool{0: true, 2: true, 3: true, 4: true, 6: true, 7: true, 8: true, 10: true, 11: true, 12: true, 14: true}, Tempo(120)),
+	logger := logger.Ctx("main")
+	stream := BufferAudio(
+		Quantise(
+			Mix(
+				[]Stream{
+					Sequence(MakeStream(Kick), []bool{true, false}, true),
+					Sequence(MakeStream(Hat), []bool{true}, true),
+					Sequence(MakeStream(Clap), []bool{false, false, true, false}, true),
+				},
+			),
+			Tempo,
+			delbuf.Sixteenth,
+		),
+		4,
+		delbuf.Timing{}.From(Tempo, Format),
 	)
+	logger.Log("built stream")
 
-	fmt.Printf("%++v\n", banger)
+	speaker.Init(Format.SampleRate, Format.SampleRate.N(time.Second/10))
+	logger.Log("initialising speaker")
 
-	speaker.Play(banger)
-	time.Sleep(time.Second * 4 * 4)
+	speaker.Play(beep.Iterate(stream))
+	logger.Log("playing")
+
+	Timer(time.Now())
+}
+
+// Timer prints the current time every half second. It also blocks the thread forever
+// so that the audio can play
+func Timer(start time.Time) {
+	clock := time.NewTicker(time.Second / 2)
+	for tick := range clock.C {
+		fmt.Printf("\rTime: % 20s", tick.Sub(start))
+	}
 }
