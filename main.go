@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"log"
 	"time"
+	delbuf "tjweldon/beatbox/src/delay_buffers"
+	"tjweldon/beatbox/src/streams"
+	"tjweldon/beatbox/src/util"
 
-	delbuf "tjweldon/beatbox/delay_buffers"
-	"tjweldon/beatbox/streams"
-	"tjweldon/beatbox/util"
-
-	arg "github.com/alexflint/go-arg"
+	"github.com/alexflint/go-arg"
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/speaker"
 )

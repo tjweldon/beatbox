@@ -1,4 +1,4 @@
-package delaybuffers
+package delay_buffers
 
 import (
 	"github.com/faiface/beep"
@@ -80,3 +80,12 @@ const (
 	Eighth
 	Sixteenth
 )
+
+// PopBuffer pops a streamer from the head of a buffer and returns both the head as a streamer and
+// the truncated tail as a buffer
+func PopBuffer(buf *beep.Buffer, upto int) (head beep.Streamer, tail *beep.Buffer) {
+	head = buf.Streamer(0, upto)
+	tail = TruncateHead(buf, upto-1)
+
+	return head, tail
+}
