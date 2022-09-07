@@ -15,7 +15,7 @@ var logger = util.Logger{}.Ctx("streams")
 // Stream is a synchronous generator of beep.Streamers
 type Stream func() *FStreamer
 
-// Gen is a convenience function for creating a generator from a Stream
+// Gen is a convenience function for creating a beep.Streamer generator from a Stream
 func (s Stream) Gen() func() beep.Streamer {
 	return func() beep.Streamer {
 		return s()
@@ -43,14 +43,17 @@ type StreamBuf struct {
 	buf *beep.Buffer
 }
 
+// MakeStreamBuf returns a StreamBuf that plays the given sample
 func MakeStreamBuf(buf *beep.Buffer) StreamBuf {
 	return StreamBuf{buf: buf}
 }
 
+// All returns a beep.Streamer that plays the whole buffer
 func (sb StreamBuf) All() beep.Streamer {
 	return sb.buf.Streamer(0, sb.buf.Len())
 }
 
+// Stream implements the Generator interface for Delay
 func (sb StreamBuf) Stream() Stream {
 	stream := func() *FStreamer {
 		return F(sb.buf.Format(), sb.All())
@@ -67,7 +70,7 @@ type Sequencer struct {
 	Sound Stream
 }
 
-// Sequence is a Sequencer implementation
+// Stream implements the Generator interface for Mixer
 func (seq Sequencer) Stream() Stream {
 	logger := logger.Ctx("Sequence")
 	n := 0
@@ -83,6 +86,8 @@ func (seq Sequencer) Stream() Stream {
 			return nil
 		}
 
+		logger.Log("sequence with sound", seq.Sound, ": step", n, "is", seq.Seq[n])
+
 		// otherwise send either the sound
 		if seq.Seq[n] {
 			s = seq.Sound()
@@ -92,14 +97,17 @@ func (seq Sequencer) Stream() Stream {
 
 		// handle streamer exhausted
 		if s == nil {
+			logger.Log("instrument exhausted, sending nil")
 			return nil
 		}
 
-		n = (n + 1)
+		n++
 		if seq.Loop {
+			logger.Log("looping sequence")
 			n = n % len(seq.Seq)
 		}
 
+		logger.Log("sending sequence")
 		return s
 	}
 
@@ -107,27 +115,44 @@ func (seq Sequencer) Stream() Stream {
 }
 
 // Mixer takes a slice of Stream functions and returns a Stream function which
-// is the superposition of all the streasb.
+// is the superposition of all the Tracks.
 type Mixer struct {
 	Tracks []Stream
 	Format beep.Format
 }
 
-// Mix is an implementation of Mixer
+// Stream implements the Generator interface for Mixer
 func (m Mixer) Stream() Stream {
 	logger := logger.Ctx("Mix")
 	logger.Log("initialising mix outStream")
+
+	emptyGen := StreamBuf{Empty}.Stream()
 	outStream := func() *FStreamer {
 		logger.Ctx("outStream")
 
 		sequenceStep := make([]beep.Streamer, len(m.Tracks))
-		allClosed := false
+		allClosed := true
+		closed := make([]bool, len(m.Tracks))
 		for i, incoming := range m.Tracks {
-			sequenceStep[i] = incoming()
 			// if sequenceStep[i] == nil is true for all incoming
 			// then we're done
-			allClosed = allClosed && sequenceStep[i] == nil
+			chunk := incoming()
+			closed[i] = chunk == nil
+
+			// allClosed -> false if any chunk is not nil
+			allClosed = closed[i] && allClosed
+
+			if chunk == nil {
+				// handle upstream exhausted by sending empty buffer
+				sequenceStep[i] = emptyGen()
+				logger.Log("no sample from upstream track", i, "sending empty buffer")
+			} else {
+				// otherwise the sound is added to the mix
+				sequenceStep[i] = chunk
+				logger.Log("got sample from upstream track", i)
+			}
 		}
+		logger.Log("closed:", closed)
 		// allClosed being true indicates we're done
 		if allClosed {
 			logger.Log("all sequences exhausted")
@@ -152,7 +177,7 @@ type Quantiser struct {
 	Format       beep.Format
 }
 
-// Quantise is an implementation of Quantiser
+// Stream implements the Generator interface for Quantiser
 func (q Quantiser) Stream() Stream {
 	logger := logger.Ctx("Quantise")
 	buf := beep.NewBuffer(q.Format)
@@ -185,7 +210,7 @@ func (q Quantiser) Stream() Stream {
 		)
 
 		// send one beat'Tracks worth
-		logger.Log("sending a quantum of tunage")
+		logger.Log("sending a quantum of tunage, length", timing)
 		return F(q.Format, buf.Streamer(0, timing.Samples))
 	}
 
@@ -203,9 +228,9 @@ func PopBuffer(buf *beep.Buffer, upto int) (head beep.Streamer, tail *beep.Buffe
 	return head, tail
 }
 
-// AudioBuffer is a function that takes a Stream and uses it to populate a
-// buffer that is used to store a set amound of pre-rendered audio. The
-// generator should send the buffer'Tracks contents to the speaker and then refill
+// AudioBuf is a function that takes a Stream and uses it to populate a
+// buffer that is used to store a set amount of pre-rendered audio. The
+// generator should send the buffer's contents to the speaker and then refill
 type AudioBuf struct {
 	Incoming    Stream
 	QuantaCount int
@@ -213,7 +238,7 @@ type AudioBuf struct {
 	Format      beep.Format
 }
 
-// BufferAudio is an implementation of AudioBuf
+// Stream is an implementation of Generator for AudioBuf
 func (ab AudioBuf) Stream() Stream {
 
 	logger := logger.Ctx("BufferAudio")
@@ -231,15 +256,20 @@ func (ab AudioBuf) Stream() Stream {
 		for buf.Len() <= timing.Samples*ab.QuantaCount {
 			nxt := ab.Incoming()
 			if nxt == nil {
-				return nil
+				// play silence if the upstream is exhausted
+				buf.Append(beep.Silence(timing.Samples))
+				logger.Log("upstream exhausted, sending silence")
+			} else {
+				buf.Append(nxt)
+				logger.Log("got sample from upstream, buffer now", buf.Len(), "samples")
 			}
-			buf.Append(nxt)
 		}
 		var out beep.Streamer
-		logger.Log("buffer has", buf.Len(), "samples")
 
 		// pop the head off the buffer
 		out, buf = PopBuffer(buf, timing.Samples)
+		logger.Log("sending a streamer of length", timing.Samples, "samples")
+		logger.Log("buffer of", buf.Len(), "samples remaining")
 		return F(buf.Format(), out)
 	}
 

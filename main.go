@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	delbuf "tjweldon/beatbox/delay_buffers"
@@ -29,11 +30,8 @@ var Tempo = delbuf.Tempo(128)
 // Format is the format of the samples
 var Format = Kick.Format()
 
-// Beat is a Stream that always returns a streamer that is at least one beat long and silent
-var Beat = func() beep.Streamer { return beep.Silence(Tempo.Count(Format)) }
-
 type Cli struct {
-	PrintFormat bool `arg:"-p,--print-format" help:"Prints out the beep format being used globally"`
+	Loop bool `arg:"-l,--loop" help:"loop the sequence stream" default:"false"`
 }
 
 func (c Cli) Init() Cli {
@@ -46,67 +44,68 @@ var args = Cli{}.Init()
 func main() {
 	logger := logger.Ctx("main")
 
-	if args.PrintFormat {
-		fmt.Println(Format)
-		fmt.Println(Hat.Format())
-		fmt.Println(Clap.Format())
-		return
-	}
-
 	sequencer2Stream := func(s streams.Sequencer) streams.Stream { return s.Stream() }
 
-	// composition of generators
+	// composition if instruments and their sequences
 	instruments := util.Map(
 		sequencer2Stream,
 		[]streams.Sequencer{
 			// 4 to the floor kick drum
-			streams.Sequencer{
+			{
 				Seq:   []bool{true, false},
-				Loop:  true,
+				Loop:  args.Loop,
 				Sound: streams.MakeStreamBuf(Kick).Stream(),
 			},
 
 			// hats on 16ths
 			{
 				Seq:   []bool{true},
-				Loop:  true,
+				Loop:  args.Loop,
 				Sound: streams.MakeStreamBuf(Hat).Stream(),
 			},
 
 			// off beat clap
 			{
 				Seq:   []bool{false, false, true, false},
-				Loop:  true,
+				Loop:  args.Loop,
 				Sound: streams.MakeStreamBuf(Clap).Stream(),
 			},
 		},
 	)
 
-	// create the output stream as:
 	// an AudioBuf whose stream is fed to the speaker
+	mixed := streams.Mixer{
+		Tracks: instruments,
+		Format: Format,
+	}.Stream()
+
+	// quantise the mixed sequences to the tempo & quantisation
+	quantised := streams.Quantiser{
+		Tempo:        Tempo,
+		Quantisation: delbuf.Sixteenth,
+		Format:       Format,
+
+		// a mixer feeding into the Quantiser
+		Incoming: mixed,
+	}.Stream()
+
+	// buffer the output stream
 	stream := streams.AudioBuf{
 		QuantaCount: 4,
 		Tempo:       Tempo,
 		Format:      Format,
 
 		// a Quantiser feeding into the AudioBuf
-		Incoming: streams.Quantiser{
-			Tempo:        Tempo,
-			Quantisation: delbuf.Sixteenth,
-			Format:       Format,
-
-			// a mixer feeding into the Quantiser
-			Incoming: streams.Mixer{
-				Tracks: instruments,
-				Format: Format,
-			}.Stream(),
-		}.Stream(),
+		Incoming: quantised,
 	}.Stream()
 	logger.Log("built stream")
 
 	// initialising the speaker
-	speaker.Init(Format.SampleRate, Format.SampleRate.N(time.Second/10))
-	logger.Log("initialising speaker")
+	err := speaker.Init(Format.SampleRate, Format.SampleRate.N(time.Second/10))
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger.Log("initialised speaker")
 
 	// playing the stream
 	speaker.Play(beep.Iterate(stream.Gen()))
