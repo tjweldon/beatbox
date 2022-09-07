@@ -60,7 +60,7 @@ func main() {
 		sequencer2Stream,
 		[]streams.Sequencer{
 			// 4 to the floor kick drum
-			streams.Sequencer{
+			{
 				Seq:   []bool{true, false},
 				Loop:  true,
 				Sound: streams.MakeStreamBuf(Kick).Stream(),
@@ -68,14 +68,17 @@ func main() {
 
 			// hats on 16ths
 			{
-				Seq:   []bool{true},
+				Seq:   []bool{true, true, false},
 				Loop:  true,
 				Sound: streams.MakeStreamBuf(Hat).Stream(),
 			},
 
 			// off beat clap
 			{
-				Seq:   []bool{false, false, true, false},
+				Seq: []bool{
+					false, false, true, false, false, false, true, true,
+					false, false, true, false, false, false, true, false,
+				},
 				Loop:  true,
 				Sound: streams.MakeStreamBuf(Clap).Stream(),
 			},
