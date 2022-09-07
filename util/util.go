@@ -27,3 +27,26 @@ func BufferSample(path string) *beep.Buffer {
 	buf.Append(decoded)
 	return buf
 }
+
+func Map[T, U any](mapFunc func(T) U, s []T) (out []U) {
+	for _, t := range s {
+		out = append(out, mapFunc(t))
+	}
+
+	return out
+}
+
+// Logger is a context-aware logger
+type Logger struct {
+	prefixes []any
+}
+
+// Ctx returns a copy of the logger with the given prefix added after all pre-existing prefixes
+func (l Logger) Ctx(prefix string) Logger {
+	return Logger{append(l.prefixes, prefix+":")}
+}
+
+// Log shares its interface with log.Println
+func (l Logger) Log(msgs ...any) {
+	log.Println(append(l.prefixes, msgs...)...)
+}
