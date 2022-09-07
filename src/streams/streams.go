@@ -8,7 +8,7 @@ import (
 // Empty is literally an empty buffer
 var Empty = beep.NewBuffer(beep.Format{SampleRate: 44100, NumChannels: 2, Precision: 3})
 
-var logger = util.Logger{}.Ctx("streams")
+var logger = util.Logger{}.Ctx("streams").Vol(util.Normal)
 
 // Stream is a synchronous generator of beep.Streamers
 type Stream func() *FStreamer

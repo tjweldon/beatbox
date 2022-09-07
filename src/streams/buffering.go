@@ -3,6 +3,7 @@ package streams
 import (
 	"github.com/faiface/beep"
 	"tjweldon/beatbox/src/delay_buffers"
+	"tjweldon/beatbox/src/util"
 )
 
 // AudioBuf is a function that takes a Stream and uses it to populate a
@@ -17,7 +18,6 @@ type AudioBuf struct {
 
 // Stream is an implementation of Generator for AudioBuf
 func (ab AudioBuf) Stream() Stream {
-
 	logger := logger.Ctx("BufferAudio")
 	logger.Log("initialising buffer outStream")
 
@@ -26,7 +26,7 @@ func (ab AudioBuf) Stream() Stream {
 
 	// set up the outgoing Incoming
 	outStream := func() *FStreamer {
-		logger.Ctx("outStream")
+		logger := logger.Ctx("outStream").Vol(util.Quiet)
 
 		// the incoming audio gets appended to the audio Incoming here
 		// until the buffer contains enough audio

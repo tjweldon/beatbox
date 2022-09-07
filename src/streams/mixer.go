@@ -2,6 +2,7 @@ package streams
 
 import (
 	"github.com/faiface/beep"
+	"tjweldon/beatbox/src/util"
 )
 
 // Mixer takes a slice of Stream functions and returns a Stream function which
@@ -13,17 +14,18 @@ type Mixer struct {
 
 // Stream implements the Generator interface for Mixer
 func (m Mixer) Stream() Stream {
-	logger := logger.Ctx("Mix")
+	logger := logger.Ctx("Mix").Vol(util.Normal)
 	logger.Log("initialising mix outStream")
 
 	emptyGen := StreamBuf{Empty}.Stream()
 	outStream := func() *FStreamer {
-		logger.Ctx("outStream")
+		logger := logger.Ctx("outStream").Vol(util.Quiet)
 
 		sequenceStep := make([]beep.Streamer, len(m.Tracks))
 		allClosed := true
 		closed := make([]bool, len(m.Tracks))
 		for i, incoming := range m.Tracks {
+			_logger := logger.Ctx("mix loop").Vol(util.Quieter)
 			// if sequenceStep[i] == nil is true for all incoming
 			// then we're done
 			chunk := incoming()
@@ -35,11 +37,11 @@ func (m Mixer) Stream() Stream {
 			if chunk == nil {
 				// handle upstream exhausted by sending empty buffer
 				sequenceStep[i] = emptyGen()
-				logger.Log("no sample from upstream track", i, "sending empty buffer")
+				_logger.Log("no sample from upstream track", i, "sending empty buffer")
 			} else {
 				// otherwise the sound is added to the mix
 				sequenceStep[i] = chunk
-				logger.Log("got sample from upstream track", i)
+				_logger.Log("got sample from upstream track", i)
 			}
 		}
 		logger.Log("closed:", closed)

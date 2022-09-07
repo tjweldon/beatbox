@@ -3,6 +3,7 @@ package streams
 import (
 	"github.com/faiface/beep"
 	"tjweldon/beatbox/src/delay_buffers"
+	"tjweldon/beatbox/src/util"
 )
 
 // Quantiser is a function that takes a Stream, a Tempo and a quantisation and
@@ -16,13 +17,13 @@ type Quantiser struct {
 
 // Stream implements the Generator interface for Quantiser
 func (q Quantiser) Stream() Stream {
-	logger := logger.Ctx("Quantise")
+	logger := logger.Ctx("Quantiser.Quantise").Vol(util.Normal)
 	buf := beep.NewBuffer(q.Format)
 	timing := delay_buffers.Timing{}.From(q.Tempo, q.Format).Quantise(q.Quantisation)
 
 	logger.Log("initialising")
 	outStream := func() *FStreamer {
-		logger := logger.Ctx("outStream")
+		logger := logger.Ctx("outStream").Vol(util.Quiet)
 		truncated := delay_buffers.TruncateHead(buf, timing.Samples)
 		buf = beep.NewBuffer(q.Format)
 		nxt := q.Incoming()
@@ -46,8 +47,8 @@ func (q Quantiser) Stream() Stream {
 			),
 		)
 
-		// send one beat'Tracks worth
-		logger.Log("sending a quantum of tunage, length", timing)
+		// send the quantised chunk
+		logger.Log("sending quantised chunk.", "Timing:", timing)
 		return F(q.Format, buf.Streamer(0, timing.Samples))
 	}
 
