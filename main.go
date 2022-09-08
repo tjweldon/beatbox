@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 	delbuf "tjweldon/beatbox/src/delay_buffers"
-	"tjweldon/beatbox/src/examples"
+	"tjweldon/beatbox/src/synth"
 	"tjweldon/beatbox/src/util"
 
 	"github.com/alexflint/go-arg"
@@ -48,9 +48,11 @@ func main() {
 	logger := logger.Ctx("main").Vol(util.Loud)
 
 	// create the audio stream
-	stream := examples.DrumMachine(Kick, Clap, Hat, args.Loop, Format, Tempo)
+	//stream := examples.DrumMachine(Kick, Clap, Hat, args.Loop, Format, Tempo)
+
 	logger.Log("built stream")
 
+    stream := synth.Oscillator(Format, 1000)
 	// initialising the speaker
 	err := speaker.Init(Format.SampleRate, Format.SampleRate.N(time.Second/10))
 	if err != nil {

@@ -9,6 +9,8 @@ import (
 	"github.com/faiface/beep/wav"
 )
 
+func Min(a, b int) int { return map[bool]int{true: a, false: b}[ a < b ] }
+
 // IO Plumbing
 
 // BufferSample Takes care of sample buffering, fatal error if the sample cannot
