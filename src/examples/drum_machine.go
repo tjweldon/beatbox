@@ -9,40 +9,44 @@ import (
 
 var logger = util.Logger{Volume: util.Loud}.Ctx("examples/drum_machine")
 
-// DrumMachine expects some samples, a loop flag, and audio format and a tempo
+// Track expects some samples, a loop flag, and audio format and a tempo
 // and returns a stream of audio that can be fed to the speaker
-func DrumMachine(
+func Track(
 	Kick, Clap, Hat *beep.Buffer,
 	loop bool,
 	format beep.Format,
 	tempo delbuf.Tempo,
+	extra ...streams.Sequencer,
 ) streams.Stream {
-	logger := logger.Ctx("DrumMachine").Vol(util.Normal)
+	logger := logger.Ctx("Track").Vol(util.Normal)
 	// composition if instruments and their sequences
 	instruments := util.Map(
 		streams.Sequencer.Stream,
-		[]streams.Sequencer{
-			// 4 to the floor kick drum
-			{
-				Seq:   []bool{true, false},
-				Loop:  loop,
-				Sound: streams.MakeStreamBuf(Kick).Stream(),
-			},
+		append(
+			[]streams.Sequencer{
+				// 4 to the floor kick drum
+				{
+					Seq:   []bool{true, false},
+					Loop:  loop,
+					Sound: streams.MakeStreamBuf(Kick).Stream(),
+				},
 
-			// hats on 16ths
-			{
-				Seq:   []bool{true},
-				Loop:  loop,
-				Sound: streams.MakeStreamBuf(Hat).Stream(),
-			},
+				// hats on 16ths
+				{
+					Seq:   []bool{true},
+					Loop:  loop,
+					Sound: streams.MakeStreamBuf(Hat).Stream(),
+				},
 
-			// off beat clap
-			{
-				Seq:   []bool{false, false, true, false},
-				Loop:  loop,
-				Sound: streams.MakeStreamBuf(Clap).Stream(),
+				// off beat clap
+				{
+					Seq:   []bool{false, false, true, false},
+					Loop:  loop,
+					Sound: streams.MakeStreamBuf(Clap).Stream(),
+				},
 			},
-		},
+			extra..., // add any extra instruments
+		),
 	)
 
 	logger.Log("instruments")

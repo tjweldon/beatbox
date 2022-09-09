@@ -5,6 +5,8 @@ import (
 	"log"
 	"time"
 	delbuf "tjweldon/beatbox/src/delay_buffers"
+	"tjweldon/beatbox/src/examples"
+	"tjweldon/beatbox/src/streams"
 	"tjweldon/beatbox/src/synth"
 	"tjweldon/beatbox/src/util"
 
@@ -46,14 +48,38 @@ var args = Cli{}.Init()
 
 func main() {
 	logger := logger.Ctx("main").Vol(util.Loud)
-
+	envelope := (&synth.Envelope{}).Init(
+		time.Millisecond*100,
+		time.Millisecond*500,
+		time.Second,
+		0.0,
+		Format,
+	)
+	envelope.SetIncoming(synth.Oscillator(Format, 300))
+	extra := []streams.Sequencer{
+		{
+			Seq:   []bool{true, false},
+			Loop:  args.Loop,
+			Sound: envelope.Stream(),
+		},
+	}
 	// create the audio stream
-	//stream := examples.DrumMachine(Kick, Clap, Hat, args.Loop, Format, Tempo)
-
+	streams := []streams.Stream{
+		examples.Track(Kick, Clap, Hat, args.Loop, Format, Tempo, extra...),
+		streams.Sequencer{Sound: envelope.Stream(), Loop: args.Loop, Seq: []bool{true, false}}.Stream(),
+	}
 	logger.Log("built stream")
 
-    stream := synth.Oscillator(Format, 1000)
 	// initialising the speaker
+	PlayStream(streams[1])
+
+	// play and wait for the user to exit
+	Timer(time.Now())
+}
+
+func PlayStream(stream streams.Stream) {
+	logger := logger.Ctx("PlayStream").Vol(util.Loud)
+	logger.Log("playing stream")
 	err := speaker.Init(Format.SampleRate, Format.SampleRate.N(time.Second/10))
 	if err != nil {
 		log.Fatal(err)
@@ -63,9 +89,6 @@ func main() {
 	// playing the stream
 	speaker.Play(beep.Iterate(stream.Gen()))
 	logger.Log("playing")
-
-	// play and wait for the user to exit
-	Timer(time.Now())
 }
 
 // Timer prints the current time every half second. It also blocks the thread forever
